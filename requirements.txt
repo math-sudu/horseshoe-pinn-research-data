@@ -1,0 +1,5 @@
+numpy==2.4.4
+scipy==1.16.2
+torch==2.8.0
+threadpoolctl
+pypardiso==0.4.7

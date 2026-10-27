@@ -1,0 +1,85 @@
+{
+  "response_config": "config/elastoplastic_study.json",
+  "candidate_seed_count": 24,
+  "candidate_construction": "Equal-arclength midpoint seeds and their reflections about the section centreline, ordered by intrados arclength.",
+  "target_sampling": "Equal-arclength midpoints starting at the crown symmetry axis, on both the contact and intrados. The grids are reflection-closed with equal weights.",
+  "minimum_contour_clearance_m": 0.3,
+  "installation_basis": "Prescribed synthetic installation scenario, fixed before response evaluation and selection. The 0.30 m clearance is an assumed mounting allowance; no site-specific mounting dimensions or surveyed sight lines are supplied.",
+  "visibility_basis": "Visibility is assumed throughout each accessible interval in this synthetic scenario. Supplied obstruction intervals can be entered as visibility exclusions; their endpoints are excluded too.",
+  "action": {
+    "kind": "new_reflector",
+    "components": [
+      "x",
+      "y"
+    ],
+    "protocol_ref": "config/elastoplastic_study.json#inference"
+  },
+  "access_regions": {
+    "full": {
+      "accessible_intervals": [
+        {
+          "start": {
+            "arc": "crown",
+            "fraction": 0.0
+          },
+          "end": {
+            "arc": "right_wall",
+            "fraction": 1.0
+          }
+        }
+      ],
+      "visibility_exclusions": []
+    },
+    "crown": {
+      "accessible_intervals": [
+        {
+          "start": {
+            "arc": "crown",
+            "fraction": 0.0
+          },
+          "end": {
+            "arc": "crown",
+            "fraction": 1.0
+          }
+        }
+      ],
+      "visibility_exclusions": []
+    }
+  },
+  "baseline_layouts": {
+    "symmetric": {
+      "relocations": {}
+    },
+    "asymmetric": {
+      "relocations": {
+        "SL05": {
+          "arc": "crown",
+          "fraction": 0.2738898474233941
+        }
+      },
+      "basis": "One crown reflector is displaced from the symmetric layout."
+    }
+  },
+  "layouts": [
+    {
+      "name": "symmetric_full",
+      "baseline": "symmetric",
+      "access": "full"
+    },
+    {
+      "name": "asymmetric_full",
+      "baseline": "asymmetric",
+      "access": "full"
+    },
+    {
+      "name": "symmetric_crown",
+      "baseline": "symmetric",
+      "access": "crown"
+    },
+    {
+      "name": "asymmetric_crown",
+      "baseline": "asymmetric",
+      "access": "crown"
+    }
+  ]
+}

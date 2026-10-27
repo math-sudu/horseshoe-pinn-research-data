@@ -1,0 +1,64 @@
+{
+  "geometry": "config/horseshoe_geometry.json",
+  "design": "config/observation_design.json",
+  "output": "results/elastoplastic",
+  "physical": {
+    "e_ground": 1000.0,
+    "e_support": 39068.092745891,
+    "sigma_v": 1.0,
+    "k0": 1.0
+  },
+  "poisson": {"ground": 0.255, "support": 0.2},
+  "feature_seed": 3071,
+  "device": "cuda:0",
+  "ground": {
+    "cohesion_mpa": 0.05,
+    "friction_deg": 25.6,
+    "dilatancy_deg": 0.0,
+    "hardening_mpa": 0.0,
+    "initial_vertical_compression_mpa": 1.45,
+    "initial_horizontal_ratio": 1.1,
+    "basis": "Prescribed numerical stress scale: one quarter of the field cohesion and initial stress, retaining their ratio and friction angle. This activates ground plasticity while keeping the representative 60 MPa concrete support below its compressive strength. Field inputs retain their measured/design values."
+  },
+  "support": {"closure": "closed", "law": "finite-strain Hencky elasticity", "compressive_strength_mpa": 60.0},
+  "release": {
+    "n_loads": 4,
+    "law": "bounded_initial_stress_release",
+    "modes": ["Qx", "Qy", "Gv", "Gh"],
+    "path": "Proportional removal of the initial cavity restraint, with stress-free installed support and fixed engineering initial ground stress."
+  },
+  "increment": {"steps": 8},
+  "training": {
+    "width": 64,
+    "patch_length": 5.0,
+    "radial_bands": 4,
+    "far_factor": 100.0,
+    "amplitude": 1.0,
+    "n_volume": 14,
+    "n_edge": 21,
+    "boundary_weight": 5.0,
+    "displacement_trace_weight": 10.0,
+    "far_displacement_trace_weight": 10.0,
+    "ridge": 1e-11,
+    "observation_weight": 1000.0,
+    "newton_step_tolerance": 0.0001,
+    "displacement_step_tolerance_mm": 0.1,
+    "pressure_step_relative_tolerance": 0.002,
+    "physics_rms_tolerance_mpa": 0.01,
+    "maximum_iterations": 60,
+    "line_search_minimum": 0.0001220703125,
+    "threads": 4,
+    "linear_solver": "pardiso"
+  },
+  "nominal_loads_mpa": [1.276, 1.16, 0.0, 0.0],
+  "inference": {
+    "load_mean_mpa": [1.276, 1.16, 0.0, 0.0],
+    "load_std_mpa": [0.03, 0.03, 0.025, 0.025],
+    "load_standardized_bounds": [-4.0, 4.0],
+    "stiffness_bounds_mpa": [700.0, 1400.0],
+    "stiffness_prior": "uniform_log",
+    "noise_std_m": 0.0001,
+    "basis": "Prescribed before recovery and candidate selection. The bounded load family stays within the initial-stress release capacity throughout the contour."
+  },
+  "evaluation": {"contour_points": 600, "depth_points": 61}
+}

@@ -1,0 +1,36 @@
+{
+  "physical": {
+    "e_ground": 560.0,
+    "e_support": 35000.04629629629,
+    "sigma_v": 1.0,
+    "k0": 1.0
+  },
+  "poisson": {
+    "ground": 0.3,
+    "support": 0.2
+  },
+  "training": {
+    "width": 64,
+    "patch_length": 5.0,
+    "radial_bands": 4,
+    "far_factor": 100.0,
+    "amplitude": 1.0,
+    "n_volume": 14,
+    "n_edge": 21,
+    "boundary_weight": 5.0,
+    "displacement_trace_weight": 10.0,
+    "far_displacement_trace_weight": 10.0,
+    "ridge": 1e-11,
+    "threads": 2,
+    "observation_weight": 1000.0,
+    "newton_step_tolerance": 0.0001,
+    "displacement_step_tolerance_mm": 0.1,
+    "pressure_step_relative_tolerance": 0.002,
+    "physics_rms_tolerance_mpa": 0.01,
+    "maximum_iterations": 40,
+    "line_search_minimum": 0.0001220703125,
+    "linear_solver": "pardiso"
+  },
+  "feature_seed": 3071,
+  "steel_volume_fraction": 0.029412037037037035
+}

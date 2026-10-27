@@ -1,0 +1,48 @@
+{
+  "baseline": "data/field_convergence",
+  "output": "results/elastoplastic/field_convergence",
+  "device": "cuda:0",
+  "ground": {
+    "cohesion_mpa": 0.2,
+    "friction_deg": 25.6,
+    "dilatancy_deg": 0.0,
+    "hardening_mpa": 0.0,
+    "initial_vertical_compression_mpa": 5.8,
+    "initial_horizontal_ratio": 1.1
+  },
+  "support": {
+    "law": "finite-strain Hencky elasticity",
+    "closure": "open_invert"
+  },
+  "release": {
+    "n_loads": 4,
+    "law": "bounded_initial_stress_release",
+    "parameterization": "fixed_initial_stress_ratio"
+  },
+  "increment": {
+    "steps": 8,
+    "path": "Monotone continuation to the measured shoulder-convergence increment.",
+    "reference": "Initially unstressed installed arch and geostatically prestressed ground; the invert remains open during the comparison interval. These are the declared equivalent-state assumptions."
+  },
+  "training": {
+    "width": 64,
+    "n_volume": 14,
+    "n_edge": 21,
+    "ridge": 1e-11,
+    "observation_weight": 1000.0,
+    "newton_step_tolerance": 0.0001,
+    "displacement_step_tolerance_mm": 0.1,
+    "pressure_step_relative_tolerance": 0.002,
+    "physics_rms_tolerance_mpa": 0.01,
+    "maximum_iterations": 40,
+    "line_search_minimum": 0.0001220703125,
+    "threads": 2,
+    "linear_solver": "pardiso"
+  },
+  "observations": {
+    "fit_indices": [
+      0
+    ],
+    "purpose": "Shoulder-convergence application with fixed engineering material properties and stress ratio."
+  }
+}
