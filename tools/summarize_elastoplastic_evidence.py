@@ -1,5 +1,6 @@
 """Summarize target accuracy and paired design scores from saved results."""
 from pathlib import Path
+import argparse
 import json
 import sys
 
@@ -22,24 +23,25 @@ def write_json(name, value):
                            encoding='utf-8')
 
 
-def main():
-    surface = ResponseSurface.load(OUT / 'response.npz')
-    cases = {row['name']: row for row in read_json('sampling.json')['cases']}
-    accuracy = read_json('response.json')
-    for row in accuracy['validation']:
-        case = cases[row['case']]
-        x = surface.standardized(case['loads_mpa'], case['modulus_mpa'])
-        predicted = surface.evaluate_standardized(x, ('stress_mpa',))['stress_mpa'][1:3, :, 0]
-        with np.load(OUT / row['case'] / 'readout.npz') as saved:
-            reference = saved['stress_mpa'][1:3, :, 0]
-            weights = thickness_weights(saved['depth_m']) / (2 * np.ptp(saved['depth_m']))
-            error = predicted - reference
-            row['errors']['transition_stress_mpa'] = {
-                'rmse': float(np.sqrt(np.sum(error**2 * weights))),
-                'relative_l2': float(np.sqrt(np.sum(error**2 * weights) /
-                                             np.sum(reference**2 * weights))),
-            }
-    write_json('response.json', accuracy)
+def main(design_only=False):
+    if not design_only:
+        surface = ResponseSurface.load(OUT / 'response.npz')
+        cases = {row['name']: row for row in read_json('sampling.json')['cases']}
+        accuracy = read_json('response.json')
+        for row in accuracy['validation']:
+            case = cases[row['case']]
+            x = surface.standardized(case['loads_mpa'], case['modulus_mpa'])
+            predicted = surface.evaluate_standardized(x, ('stress_mpa',))['stress_mpa'][1:3, :, 0]
+            with np.load(OUT / row['case'] / 'readout.npz') as saved:
+                reference = saved['stress_mpa'][1:3, :, 0]
+                weights = thickness_weights(saved['depth_m']) / (2 * np.ptp(saved['depth_m']))
+                error = predicted - reference
+                row['errors']['transition_stress_mpa'] = {
+                    'rmse': float(np.sqrt(np.sum(error**2 * weights))),
+                    'relative_l2': float(np.sqrt(np.sum(error**2 * weights) /
+                                                 np.sum(reference**2 * weights))),
+                }
+        write_json('response.json', accuracy)
 
     design = read_json('design_independent_01.json')
     selected = {row['target']: row for row in design['selections']
@@ -59,10 +61,10 @@ def main():
         normalization='Common mean baseline variance across the saved scrambles',
         targets=contrasts)
     write_json('design_independent_01.json', design)
-    print(json.dumps(dict(transition_stress_rmse_mpa=[
-        row['errors']['transition_stress_mpa']['rmse'] for row in accuracy['validation']],
-        selected_location_contrasts=contrasts), indent=2))
+    print(json.dumps(dict(selected_location_contrasts=contrasts), indent=2))
 
 
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--design-only', action='store_true')
+    main(parser.parse_args().design_only)

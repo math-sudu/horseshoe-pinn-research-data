@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+from concurrent.futures import ProcessPoolExecutor, as_completed
 import json
 from pathlib import Path
 import sys
@@ -113,37 +114,45 @@ def selection(data, case, scores, risks, target):
         expected_baseline_variance_mpa2=float(np.mean(risks[:, j])))
 
 
+def design_batch(scenario, rows, scramble, power, order):
+    with threadpool_limits(limits=1):
+        data = inputs()
+        maps, noise = target_maps(data), covariance(data, scenario)
+        readings = predictive_draws(data, noise, scramble, power)
+        base = NonlinearInference(data['surface'], rows, noise, order=order).fit(readings)
+        base_variance = posterior_variances(base, maps)
+        batch = np.zeros((48, len(TARGETS)))
+        for i in range(48):
+            added = [14+2*i, 15+2*i]
+            if set(rows).intersection(added):
+                continue
+            after = NonlinearInference(data['surface'], rows+added, noise, order=order).fit(
+                readings, initial=base.means)
+            batch[i] = (base_variance-posterior_variances(after, maps)).mean(axis=0)
+        return batch, base_variance.mean(axis=0)
+
+
 def design(args):
     data, started = inputs(), time.perf_counter()
-    maps = target_maps(data)
-    noise = covariance(data, args.scenario)
     baselines = {case['baseline']: case['baseline_rows'] for case in data['cases']}
-    scores, risks = {}, {}
-    for baseline, rows in baselines.items():
-        scores[baseline], risks[baseline] = [], []
-        for scramble in range(args.scrambles):
-            readings = predictive_draws(data, noise, scramble, args.power)
-            base = NonlinearInference(data['surface'], rows, noise).fit(readings)
-            base_variance = posterior_variances(base, maps)
-            risks[baseline].append(base_variance.mean(axis=0))
-            batch = np.zeros((48, len(TARGETS)))
-            for i in range(48):
-                added = [14+2*i, 15+2*i]
-                if set(rows).intersection(added):
-                    continue
-                after = NonlinearInference(data['surface'], rows+added, noise).fit(readings, initial=base.means)
-                batch[i] = (base_variance-posterior_variances(after, maps)).mean(axis=0)
-            scores[baseline].append(batch)
+    scores = {name: np.empty((args.scrambles, 48, len(TARGETS))) for name in baselines}
+    risks = {name: np.empty((args.scrambles, len(TARGETS))) for name in baselines}
+    with ProcessPoolExecutor(max_workers=args.workers) as pool:
+        futures = {pool.submit(design_batch, args.scenario, rows, scramble, args.power,
+                               args.order): (baseline, scramble)
+                   for baseline, rows in baselines.items() for scramble in range(args.scrambles)}
+        for future in as_completed(futures):
+            baseline, scramble = futures[future]
+            scores[baseline][scramble], risks[baseline][scramble] = future.result()
             print(json.dumps(dict(stage='design', scenario=args.scenario, baseline=baseline,
                 scramble=scramble, elapsed_seconds=time.perf_counter()-started)), flush=True)
-        scores[baseline], risks[baseline] = np.asarray(scores[baseline]), np.asarray(risks[baseline])
-    report = dict(scenario=args.scenario, draws_per_scramble=2**(args.power+1),
+    report = dict(scenario=args.scenario, stiffness_order=args.order, draws_per_scramble=2**(args.power+1),
         scrambles=args.scrambles, targets=list(TARGETS),
         selections=[selection(data, case, scores[case['baseline']], risks[case['baseline']], target)
                     for target in ('pressure', 'transition_stress') for case in data['cases']],
         scores={name: values.tolist() for name, values in scores.items()},
         risks={name: values.tolist() for name, values in risks.items()})
-    write_json(OUT/f'design_{args.scenario}.json', report)
+    write_json(args.output or OUT/f'design_{args.scenario}.json', report)
 
 
 def reference_cases():
@@ -162,6 +171,27 @@ def uncertainty_interval(baseline, augmented, rng):
     b = np.take_along_axis(baseline[None], indices, axis=2).mean(axis=(1, 2))
     a = np.take_along_axis(augmented[None], indices, axis=2).mean(axis=(1, 2))
     return np.quantile(100*(1-a/b), [.025, .975]).tolist()
+
+
+def recovery_batch(scenario, rows, options, errors, references, order):
+    with threadpool_limits(limits=1):
+        data = inputs()
+        surface, noise = data['surface'], covariance(data, scenario)
+        depth = data['depth']
+        dw = thickness_weights(depth)/(depth[-1]-depth[0])/2
+        all_mse, pressure_errors, stress_errors, boundary = [], [], [], []
+        for i, row in enumerate(references):
+            with np.load(OUT/row['name']/'readout.npz') as saved:
+                truth = dict(saved)
+            readings = np.r_[truth['baseline_xy_m'].ravel(), truth['candidate_xy_m'].ravel()]+errors[i]
+            posterior = NonlinearInference(surface, rows, noise, order=order, **options).fit(readings)
+            dp = posterior.field_mean('pressure_mpa')-truth['pressure_mpa']
+            ds = posterior.field_mean('stress_mpa')[:, 1:3, :, 0]-truth['stress_mpa'][1:3, :, 0]
+            all_mse.append(np.column_stack((np.mean(dp*dp, axis=1), np.einsum('nsd,d->n', ds*ds, dw))))
+            pressure_errors.append(np.mean(dp*dp, axis=0))
+            stress_errors.append(np.mean(ds*ds, axis=0))
+            boundary.append(float(np.max(np.sum(posterior.weights*np.any(np.abs(posterior.means)>3.99, axis=-1), axis=-1))))
+        return (np.asarray(all_mse), np.asarray(pressure_errors), np.asarray(stress_errors), max(boundary))
 
 
 def recovery(args):
@@ -184,38 +214,45 @@ def recovery(args):
     if args.scenario == 'independent_01':
         methods['fixed_modulus'] = (list(range(14)), dict(fixed_modulus=1000.))
         methods['summaries'] = (list(range(14)), dict(summaries=ChordSummaries(baseline_points(data['layout']))))
-    surface, depth = data['surface'], data['depth']
-    dw = thickness_weights(depth)/(depth[-1]-depth[0])/2
-    arrays = dict(noise_m=errors, reference_names=np.array([row['name'] for row in references]),
+    depth = data['depth']
+    arrays = dict(stiffness_order=args.order, noise_m=errors, reference_names=np.array([row['name'] for row in references]),
                   moduli_mpa=np.array([row['modulus_mpa'] for row in references]), depth_m=depth)
+    arrays['selected_indices'] = np.array([row['selected_index'] for row in report['selections']])
     partial = OUT/f'recovery_partial_{args.scenario}.npz'
     if partial.exists():
         with np.load(partial) as saved:
             np.testing.assert_array_equal(saved['noise_m'], errors)
             np.testing.assert_array_equal(saved['reference_names'], arrays['reference_names'])
+            np.testing.assert_array_equal(saved['stiffness_order'], args.order)
+            np.testing.assert_array_equal(saved['selected_indices'], arrays['selected_indices'])
             arrays.update(dict(saved))
     summaries = []
+    groups = {}
     for name, (rows, options) in methods.items():
-        if name+'_mse' in arrays:
-            continue
-        all_mse, pressure_errors, stress_errors, boundary = [], [], [], []
-        for i, row in enumerate(references):
-            with np.load(OUT/row['name']/'readout.npz') as saved:
-                truth = dict(saved)
-            readings = np.r_[truth['baseline_xy_m'].ravel(), truth['candidate_xy_m'].ravel()]+errors[i]
-            posterior = NonlinearInference(surface, rows, noise, **options).fit(readings)
-            dp = posterior.field_mean('pressure_mpa')-truth['pressure_mpa']
-            ds = posterior.field_mean('stress_mpa')[:, 1:3, :, 0]-truth['stress_mpa'][1:3, :, 0]
-            all_mse.append(np.column_stack((np.mean(dp*dp, axis=1), np.einsum('nsd,d->n', ds*ds, dw))))
-            pressure_errors.append(np.mean(dp*dp, axis=0))
-            stress_errors.append(np.mean(ds*ds, axis=0))
-            boundary.append(float(np.max(np.sum(posterior.weights*np.any(np.abs(posterior.means)>3.99, axis=-1), axis=-1))))
-        arrays[name+'_mse'] = np.asarray(all_mse)
-        arrays[name+'_pressure_pointwise_mse'] = np.asarray(pressure_errors)
-        arrays[name+'_stress_pointwise_mse'] = np.asarray(stress_errors)
-        np.savez_compressed(partial, **arrays)
-        print(json.dumps(dict(stage='recovery', scenario=args.scenario, method=name,
-            maximum_boundary_node_mass=max(boundary), elapsed_seconds=time.perf_counter()-started)), flush=True)
+        key = (tuple(rows), options.get('fixed_modulus'), 'summaries' in options)
+        groups.setdefault(key, []).append(name)
+    with ProcessPoolExecutor(max_workers=args.workers) as pool:
+        futures = {}
+        for names in groups.values():
+            completed = next((name for name in names if name+'_mse' in arrays), None)
+            if completed is not None:
+                for name in names:
+                    for suffix in ('_mse', '_pressure_pointwise_mse', '_stress_pointwise_mse'):
+                        arrays[name+suffix] = arrays[completed+suffix]
+                continue
+            rows, options = methods[names[0]]
+            futures[pool.submit(recovery_batch, args.scenario, rows, options, errors,
+                                references, args.order)] = names
+        for future in as_completed(futures):
+            names = futures[future]
+            mse, pressure, stress, boundary = future.result()
+            for name in names:
+                arrays[name+'_mse'] = mse
+                arrays[name+'_pressure_pointwise_mse'] = pressure
+                arrays[name+'_stress_pointwise_mse'] = stress
+            np.savez_compressed(partial, **arrays)
+            print(json.dumps(dict(stage='recovery', scenario=args.scenario, methods=names,
+                maximum_boundary_node_mass=boundary, elapsed_seconds=time.perf_counter()-started)), flush=True)
     for name in methods:
         for modulus in np.unique(arrays['moduli_mpa']):
             at = arrays['moduli_mpa'] == modulus
@@ -235,7 +272,7 @@ def recovery(args):
                     mse_reduction_percent=float(100*(1-a.mean()/b.mean())),
                     interval95_percent=uncertainty_interval(b, a, bootstrap)))
     np.savez_compressed(OUT/f'recovery_{args.scenario}.npz', **arrays)
-    write_json(OUT/f'recovery_{args.scenario}.json', dict(scenario=args.scenario,
+    write_json(OUT/f'recovery_{args.scenario}.json', dict(scenario=args.scenario, stiffness_order=args.order,
         noise_samples_per_state=args.noise_samples, physical_states=references, results=summaries, gains=gains))
     partial.unlink()
 
@@ -253,19 +290,20 @@ def single_case(args):
         truth = dict(saved)
     readings = np.r_[truth['baseline_xy_m'].ravel(), truth['candidate_xy_m'].ravel()]+errors
     baseline_rows = list(range(14))
-    base = NonlinearInference(surface, baseline_rows, noise).fit(readings)
+    model = NonlinearInference(surface, baseline_rows, noise, order=args.order)
+    base = model.fit(readings)
     pressure = choice(design, 'symmetric_full', 'pressure')['selected_index']
     stress = choice(design, 'symmetric_full', 'transition_stress')['selected_index']
     arrays = dict(readings_m=readings, pressure_candidate=pressure, stress_candidate=stress,
         stiffness_mpa=np.exp(surface.centers[-1]+surface.scales[-1]*base.stiffness_coordinates),
-        quadrature_weights=np.polynomial.legendre.leggauss(21)[1]/2,
+        quadrature_weights=model.prior_weights,
         pressure_reference_mpa=truth['pressure_mpa'],
         stress_reference_mpa=truth['stress_mpa'], support_reference_stress_mpa=truth['support_stress_mpa'],
         depth_m=data['depth'], pressure_std_mpa=np.sqrt(base.field_variance('pressure_mpa')[0]))
     means = {key: [] for key in ('pressure_mpa', 'stress_mpa', 'support_stress_mpa', 'inner_u_m')}
     for i in range(-1, 48):
         posterior = base if i == -1 else NonlinearInference(surface,
-            baseline_rows+[14+2*i, 15+2*i], noise).fit(readings, initial=base.means)
+            baseline_rows+[14+2*i, 15+2*i], noise, order=args.order).fit(readings, initial=base.means)
         for key in means:
             means[key].append(posterior.field_mean(key)[0])
         if i in (-1, pressure, stress):
@@ -305,6 +343,9 @@ if __name__ == '__main__':
     parser.add_argument('--power', type=int, default=6)
     parser.add_argument('--scrambles', type=int, default=4)
     parser.add_argument('--noise-samples', type=int, default=256)
+    parser.add_argument('--order', type=int, default=41)
+    parser.add_argument('--output', type=Path, help='Override the design report path')
+    parser.add_argument('--workers', type=int, default=8, help='Independent design or recovery batches')
     args = parser.parse_args()
     with threadpool_limits(limits=4):
         {'design': design, 'recovery': recovery, 'case': single_case}[args.stage](args)

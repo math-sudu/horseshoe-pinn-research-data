@@ -14,14 +14,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT/'src'))
 from ssinv.cad_geometry import SupportSection
 from ssinv.finite_strain.mixed_pinn import FieldPINN
+from analyze_field_pressure import write_pressure
 
 
 def write_json(path, value):
     path.write_text(json.dumps(value, indent=2, allow_nan=False)+'\n', encoding='utf-8')
 
 
-def solve(resume):
-    config = json.loads((ROOT/'config/elastoplastic_field.json').read_text(encoding='utf-8'))
+def solve(resume, config_path):
+    config = json.loads(config_path.read_text(encoding='utf-8'))
     base, out = ROOT/config['baseline'], ROOT/config['output']
     physical = json.loads((base/'physical_config.json').read_text(encoding='utf-8'))
     layout = json.loads((base/'layout.json').read_text(encoding='utf-8'))
@@ -59,13 +60,15 @@ def solve(resume):
         scope='The shoulder-convergence observation fits the scalar release magnitude; material properties and initial stress ratio remain prescribed.',
         elapsed_seconds=time.perf_counter()-started))
     write_json(out/'check.json', field.check_interpolation())
+    write_pressure(field, out)
     print((out/'result.json').read_text(encoding='utf-8'), flush=True)
 
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--resume', action='store_true')
+    parser.add_argument('--config', type=Path, default=ROOT/'config/elastoplastic_field.json')
     args = parser.parse_args()
     torch.set_num_threads(2)
     with threadpool_limits(limits=2):
-        solve(args.resume)
+        solve(args.resume, args.config)

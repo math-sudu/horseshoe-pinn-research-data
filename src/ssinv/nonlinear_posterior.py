@@ -143,7 +143,7 @@ class NonlinearInference:
     integral supplies the node evidence; polynomial target moments retain
     within-node curvature and between-node variation.
     """
-    def __init__(self, surface, rows, covariance, *, order=21, fixed_modulus=None,
+    def __init__(self, surface, rows, covariance, *, order=41, fixed_modulus=None,
                  summaries=None, moduli_mpa=None):
         self.surface = surface
         self.rows = np.asarray(rows, dtype=int)
