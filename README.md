@@ -99,12 +99,12 @@ differences do not establish a unique installation coordinate.
 
 ## Field convergence and conditional pressure
 
-`data/field_convergence/shoulder_history.csv` contains all 26 digitized shoulder
-readings from monitoring collected by the authors' team. The deformation values
-are unchanged. `source_elapsed_time_day` preserves the original digitized
-abscissa; `relative_day` subtracts six days to use the comparison interval's
-time origin. Fractional days are digitized plot coordinates rather than recovered
-instrument timestamps. Connecting the readings uses linear interpolation.
+`data/field_convergence/shoulder_history.csv` contains the 26 shoulder-convergence
+readings from monitoring conducted by the authors' team. The columns report
+elapsed time in days, time relative to the analysis origin, and cumulative
+deformation in millimetres. The relative time subtracts six days from the
+elapsed-time coordinate. Linear interpolation between adjacent readings
+defines the convergence at the selected interval endpoints.
 
 `interval.json` gives the selected endpoints at 4.1666666667 and 24.8888888889
 relative days. Their interpolated cumulative readings are 96.2747935871 and
